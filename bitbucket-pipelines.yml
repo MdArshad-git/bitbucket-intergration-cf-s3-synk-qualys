@@ -1,0 +1,51 @@
+image: atlassian/default-image:3
+
+pipelines:
+   default:
+      - step:
+          name: Validate with AWS
+          image: amazon/aws-cli:2.3.3
+          script:
+            - aws cloudformation validate-template --template-body file://template.yml
+      
+      - step:
+          name: Lint CloudFormation Template
+          image: python:3.8
+          script:
+            - pip install cfn-lint
+            - cfn-lint -I template.yml
+      - step:
+          name: Security Scan
+          script:
+            - pipe: atlassian/git-secrets-scan:0.5.1
+      - step:
+          name: Deploy to Production
+          deployment: Production
+          trigger: manual
+          script:
+            - pipe: atlassian/aws-cloudformation-deploy:0.12.0
+              variables:
+                AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+                AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+                AWS_DEFAULT_REGION: 'us-east-1'
+                STACK_NAME: 'sample-s3-pipeline-stack-name'
+                TEMPLATE: 'template.yml'
+                WAIT: 'true'
+
+      - step:
+          name: Install Synk CLI and integration
+          image: node:latest
+          caches:
+            - node
+          script:
+            - npm install -g snyk
+            - snyk auth $SYNK_API_TOKEN
+
+      - step:
+          name: Qualys Security Scan
+          image: qualys/qiac_security_cli
+          caches:
+            - pip  # Cache dependencies for faster builds
+          script:
+            - pip install Qualys-IaC-Security
+            - qiac scan -a "https://qualysapi.qg1.apps.qualys.in" -u "$QUALYS_USERNAME" -p "$QUALYS_PASSWORD" -n "Website Scan" -d "https://www.google.com"
